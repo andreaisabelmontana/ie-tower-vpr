@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>IE Tower Visual Place Recognition · Image Retrieval</title>
+<meta name="description" content="A visual place recognition system: given a query photo, retrieve the most similar gallery images and predict the location — across classical (SIFT/VLAD), deep (DINOv2), and CNN tracks into one FAISS index. A BCSAI Computer Vision final, rebuilt as an interactive showcase." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --ink:#0e1416;
+    --paper:#f2f5f5;
+    --paper-2:#e6ecea;
+    --line:#cfd9d6;
+    --accent:#0e8a8a;     /* teal */
+    --accent-2:#e0682b;
+    --muted:#5f6c69;
+    --shadow:0 1px 0 rgba(0,0,0,.04), 0 18px 40px -28px rgba(14,20,22,.55);
+    --r:14px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--paper);color:var(--ink);
+    font-family:"Inter",system-ui,sans-serif;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+  h1,h2,h3{font-family:"Fraunces",Georgia,serif;font-weight:500;line-height:1.08;letter-spacing:-.01em}
+  a{color:var(--accent);text-decoration:none}
+  code,.mono{font-family:"JetBrains Mono",monospace}
+
+  header.bar{position:sticky;top:0;z-index:30;background:rgba(242,245,245,.85);
+    backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .bar .wrap{display:flex;align-items:center;justify-content:space-between;height:60px}
+  .brand{font-family:"Fraunces",serif;font-size:1.02rem;display:flex;align-items:center;gap:9px}
+  .pin{width:13px;height:13px;border-radius:50% 50% 50% 0;background:var(--accent);transform:rotate(-45deg)}
+  nav.links a{color:var(--muted);font-size:.86rem;margin-left:22px;font-weight:500}
+  nav.links a:hover{color:var(--ink)}
+  @media(max-width:760px){nav.links{display:none}}
+
+  .hero{padding:84px 0 60px;border-bottom:1px solid var(--line)}
+  .kicker{font-family:"JetBrains Mono",monospace;font-size:.74rem;letter-spacing:.18em;
+    text-transform:uppercase;color:var(--accent);margin:0 0 18px}
+  .hero h1{font-size:clamp(2.4rem,5.4vw,4.2rem);margin:0 0 20px;max-width:16ch}
+  .hero p.lede{font-size:1.18rem;max-width:62ch;color:#232b2c;margin:0 0 30px}
+  .cta{display:flex;gap:12px;flex-wrap:wrap}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:11px 20px;border-radius:999px;
+    font-weight:600;font-size:.9rem;border:1px solid var(--ink);background:var(--ink);color:var(--paper);
+    transition:transform .15s ease}
+  .btn:hover{transform:translateY(-2px)}
+  .btn.ghost{background:transparent;color:var(--ink)}
+
+  /* ---- retrieval demo ---- */
+  .demo{margin-top:52px;background:#fff;border:1px solid var(--line);border-radius:var(--r);
+    box-shadow:var(--shadow);overflow:hidden}
+  .demo .top{display:flex;align-items:center;gap:10px;padding:13px 18px;border-bottom:1px solid var(--line);
+    background:var(--paper-2);flex-wrap:wrap}
+  .demo .top .t{font-family:"Fraunces",serif;font-size:1rem;margin-right:auto}
+  .seg{display:flex;background:#fff;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+  .seg button{border:none;background:transparent;font-family:"JetBrains Mono",monospace;font-size:.72rem;
+    font-weight:600;padding:6px 12px;cursor:pointer;color:var(--muted)}
+  .seg button[aria-pressed="true"]{background:var(--accent);color:#fff}
+  .demo .body{display:grid;grid-template-columns:170px 1fr;gap:20px;padding:20px}
+  @media(max-width:680px){.demo .body{grid-template-columns:1fr}}
+  .qcol .lbl,.rcol .lbl{font-family:"JetBrains Mono",monospace;font-size:.66rem;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--muted);margin:0 0 8px}
+  .tile{border-radius:10px;aspect-ratio:4/3;display:flex;align-items:flex-end;padding:8px;color:#fff;
+    font-size:.72rem;font-weight:600;text-shadow:0 1px 3px rgba(0,0,0,.4);border:1px solid rgba(0,0,0,.06)}
+  .query .tile{aspect-ratio:1/1;margin-bottom:8px}
+  .qpick{display:flex;gap:6px}
+  .qpick .mini{flex:1;border-radius:8px;aspect-ratio:1/1;cursor:pointer;border:2px solid transparent;opacity:.55;transition:.15s}
+  .qpick .mini[aria-pressed="true"]{opacity:1;border-color:var(--ink)}
+  .results{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+  @media(max-width:680px){.results{grid-template-columns:repeat(3,1fr)}}
+  .res{position:relative}
+  .res .score{position:absolute;top:5px;right:5px;background:rgba(0,0,0,.55);color:#fff;
+    font-family:"JetBrains Mono",monospace;font-size:.6rem;padding:1px 5px;border-radius:5px}
+  .res.match .tile{outline:2px solid var(--accent);outline-offset:1px}
+  .verdict{margin-top:14px;font-size:.9rem;background:var(--paper-2);border:1px solid var(--line);
+    border-radius:10px;padding:12px 14px}
+  .verdict b{color:var(--accent)}
+  .runbar{display:flex;align-items:center;gap:12px;padding:0 20px 18px}
+  .gobtn{font-size:.84rem;padding:9px 18px;border-radius:999px;border:none;background:var(--accent);color:#fff;
+    cursor:pointer;font-weight:600}
+  .runbar small{color:var(--muted);font-size:.78rem}
+
+  section{padding:74px 0;border-bottom:1px solid var(--line)}
+  .eyebrow{font-family:"JetBrains Mono",monospace;font-size:.72rem;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+  h2{font-size:clamp(1.8rem,3.6vw,2.6rem);margin:0 0 14px}
+  .section-lede{max-width:62ch;color:#2c3433;font-size:1.05rem}
+
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:36px}
+  @media(max-width:760px){.grid3{grid-template-columns:1fr}}
+  .card{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:24px;box-shadow:var(--shadow)}
+  .card .tag{font-family:"JetBrains Mono",monospace;font-size:.66rem;padding:3px 9px;border-radius:6px;
+    background:var(--paper-2);border:1px solid var(--line);color:var(--muted)}
+  .card h3{font-size:1.14rem;margin:10px 0 6px}
+  .card p{margin:0;font-size:.9rem;color:#3c4442}
+
+  .pipe{display:flex;align-items:center;gap:0;margin-top:34px;flex-wrap:wrap}
+  .pnode{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 18px;text-align:center;box-shadow:var(--shadow);font-size:.86rem}
+  .pnode b{font-family:"Fraunces",serif;font-weight:500;display:block;font-size:1rem}
+  .pl{color:var(--muted);padding:0 12px;font-size:1.1rem}
+  @media(max-width:680px){.pipe{flex-direction:column;align-items:stretch}.pl{transform:rotate(90deg);padding:6px 0;text-align:center}}
+
+  .chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:30px}
+  .chip{padding:8px 16px;border-radius:999px;border:1px solid var(--line);background:#fff;font-size:.85rem;font-weight:500}
+
+  footer{padding:48px 0 70px}
+  footer .wrap{color:var(--muted);font-size:.85rem}
+  .reveal{opacity:0;transform:translateY(18px);transition:opacity .7s ease,transform .7s ease}
+  .reveal.in{opacity:1;transform:none}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="wrap">
+    <div class="brand"><span class="pin"></span> IE&nbsp;Tower&nbsp;VPR</div>
+    <nav class="links">
+      <a href="#tracks">Three tracks</a>
+      <a href="#pipeline">Pipeline</a>
+      <a href="#stack">Stack</a>
+    </nav>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="wrap">
+    <p class="kicker">BCSAI · AI: Computer Vision · Final Project</p>
+    <h1>Show it a photo. It tells you where you are.</h1>
+    <p class="lede">A fast image-retrieval system for place recognition around the IE Tower. Given a query photo, it returns the top-K most similar gallery images and predicts the location — with three retrieval tracks (classical, deep, and CNN) sharing one FAISS index and evaluation harness.</p>
+    <div class="cta">
+      <a class="btn" href="https://github.com/saeka8/computer_vision_final" target="_blank" rel="noopener">View original source →</a>
+      <a class="btn ghost" href="#tracks">The three tracks</a>
+    </div>
+
+    <div class="demo" id="demo">
+      <div class="top">
+        <span class="t">Visual Place Recognition</span>
+        <div class="seg" id="seg" role="group" aria-label="retrieval track">
+          <button data-tr="deep" aria-pressed="true">DEEP</button>
+          <button data-tr="classical" aria-pressed="false">CLASSICAL</button>
+          <button data-tr="cnn" aria-pressed="false">CNN</button>
+        </div>
+      </div>
+      <div class="body">
+        <div class="qcol query">
+          <p class="lbl">Query photo</p>
+          <div class="tile" id="qtile"></div>
+          <div class="qpick" id="qpick"></div>
+        </div>
+        <div class="rcol">
+          <p class="lbl">Top-5 retrieved · gallery</p>
+          <div class="results" id="results"></div>
+          <div class="verdict" id="verdict">Pick a query and press <b>Retrieve</b>.</div>
+        </div>
+      </div>
+      <div class="runbar">
+        <button class="gobtn" id="go">⌕ Retrieve</button>
+        <small id="status">L2-normalized embeddings · cosine similarity · FAISS top-K</small>
+      </div>
+    </div>
+    <p style="font-size:.8rem;color:var(--muted);margin-top:10px">↑ A scripted illustration — tiles stand in for IE Tower gallery photos; switch tracks to see how rankings shift.</p>
+  </div>
+</div>
+
+<section id="tracks">
+  <div class="wrap reveal">
+    <p class="eyebrow">01 — Three retrieval tracks</p>
+    <h2>Three ways to embed a place, one index.</h2>
+    <p class="section-lede">Every track produces L2-normalized vectors that plug into the same FAISS index, so they're compared on equal footing through one shared data loader and evaluation harness.</p>
+    <div class="grid3">
+      <div class="card"><span class="tag">CLASSICAL</span><h3>SIFT / ORB → VLAD</h3><p>Local hand-crafted features aggregated into a single VLAD descriptor per image.</p></div>
+      <div class="card"><span class="tag">DEEP</span><h3>DINOv2 ViT-S/14</h3><p>Self-supervised global embeddings (with a ResNet50 fallback) — strong out of the box.</p></div>
+      <div class="card"><span class="tag">CNN BASELINE</span><h3>Supervised CNN</h3><p>A small CNN trained on gallery labels, then reused as an embedding extractor for retrieval.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="pipeline">
+  <div class="wrap reveal">
+    <p class="eyebrow">02 — Pipeline</p>
+    <h2>From query to location.</h2>
+    <div class="pipe">
+      <div class="pnode"><b>Query photo</b>one image in</div>
+      <span class="pl">→</span>
+      <div class="pnode"><b>Embed</b>L2-normalized vector</div>
+      <span class="pl">→</span>
+      <div class="pnode"><b>FAISS</b>top-K nearest</div>
+      <span class="pl">→</span>
+      <div class="pnode"><b>Predict</b>location label</div>
+    </div>
+    <p class="section-lede" style="margin-top:26px">Reproducible end to end: <code>prepare_data</code> → <code>build_index</code> (per method) → <code>run_eval</code> against a held-out test set → a <code>streamlit</code> demo UI. Evaluated with regression, classification, and ranking metrics.</p>
+  </div>
+</section>
+
+<section id="stack">
+  <div class="wrap reveal">
+    <p class="eyebrow">03 — Stack</p>
+    <h2>Built with.</h2>
+    <div class="chips">
+      <span class="chip">🐍 Python 3.11</span>
+      <span class="chip">🔎 FAISS</span>
+      <span class="chip">🧠 DINOv2 (ViT-S/14)</span>
+      <span class="chip">🖼 OpenCV · SIFT/ORB/VLAD</span>
+      <span class="chip">🔥 PyTorch (CNN / ResNet50)</span>
+      <span class="chip">📊 Streamlit</span>
+      <span class="chip">🧪 pytest</span>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    An interactive showcase of a BCSAI Computer Vision final project ·
+    Original source by <a href="https://github.com/saeka8/computer_vision_final" target="_blank" rel="noopener">saeka8</a>.
+    Rebuilt from scratch as a static site. The retrieval demo is a scripted illustration.
+  </div>
+</footer>
+
+<script>
+  const io=new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}})},{threshold:.15});
+  document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+
+  // gallery "images": each has a location + a gradient
+  const LOC={
+    atrium:{name:'Atrium',g:'linear-gradient(135deg,#0e8a8a,#1fb5a8)'},
+    aud:{name:'Auditorium',g:'linear-gradient(135deg,#3a4a8c,#6b76d6)'},
+    plaza:{name:'Plaza',g:'linear-gradient(135deg,#c46a2a,#e0a14b)'},
+    library:{name:'Library',g:'linear-gradient(135deg,#5a6b2f,#8fae57)'},
+  };
+  const QUERIES=['atrium','aud','plaza'];
+  // base gallery similarity profile per track (true location gets the strongest scores)
+  const TRACKS={
+    deep:{spread:0.06, base:0.93},
+    classical:{spread:0.13, base:0.82},
+    cnn:{spread:0.09, base:0.88},
+  };
+  let track='deep', query='atrium';
+
+  const qtile=document.getElementById('qtile');
+  const qpick=document.getElementById('qpick');
+  const results=document.getElementById('results');
+  const verdict=document.getElementById('verdict');
+  const status=document.getElementById('status');
+
+  function paintQuery(){
+    qtile.style.background=LOC[query].g; qtile.textContent=LOC[query].name+' · query';
+  }
+  function buildPicker(){
+    qpick.innerHTML=QUERIES.map(q=>`<div class="mini" data-q="${q}" title="${LOC[q].name}" style="background:${LOC[q].g}" aria-pressed="${q===query}"></div>`).join('');
+  }
+  // deterministic pseudo-score from track+query+index (no Math.random — stable)
+  function scoreFor(loc,i){
+    const t=TRACKS[track];
+    const correct = loc===query;
+    const jitter = ((i*37 + query.length*13 + track.length*7)%9)/100; // 0..0.08
+    let s = (correct? t.base : t.base - 0.18 - t.spread) - i*0.015 - jitter*t.spread*4;
+    return Math.max(0.31, Math.min(0.99, s));
+  }
+  function retrieve(){
+    status.textContent='embedding query → searching FAISS index…';
+    results.innerHTML='';
+    // candidate gallery: bias toward correct location, mix others
+    const pool=[query,query,query, 'library', otherThan(query)];
+    // build, score, sort desc
+    const ranked=pool.map((loc,i)=>({loc,score:scoreFor(loc,i)}))
+      .sort((a,b)=>b.score-a.score).slice(0,5);
+    setTimeout(()=>{
+      results.innerHTML=ranked.map(r=>`
+        <div class="res ${r.loc===query?'match':''}">
+          <div class="tile" style="background:${LOC[r.loc].g}">${LOC[r.loc].name}</div>
+          <span class="score">${r.score.toFixed(2)}</span>
+        </div>`).join('');
+      // predict by majority of top-K
+      const counts={}; ranked.forEach(r=>counts[r.loc]=(counts[r.loc]||0)+1);
+      const pred=Object.entries(counts).sort((a,b)=>b[1]-a[1])[0][0];
+      const ok=pred===query;
+      verdict.innerHTML=`Predicted location: <b>${LOC[pred].name}</b> — ${ok?'matches the query ✓':'check the ranking'} · track: <b>${track.toUpperCase()}</b>`;
+      status.textContent='L2-normalized embeddings · cosine similarity · FAISS top-K';
+    },650);
+  }
+  function otherThan(q){ const o=Object.keys(LOC).filter(k=>k!==q && k!=='library'); return o[(q.length)%o.length]; }
+
+  document.getElementById('seg').addEventListener('click',e=>{
+    const b=e.target.closest('button'); if(!b) return;
+    track=b.dataset.tr;
+    [...e.currentTarget.children].forEach(c=>c.setAttribute('aria-pressed', c===b?'true':'false'));
+    retrieve();
+  });
+  qpick.addEventListener('click',e=>{
+    const m=e.target.closest('.mini'); if(!m) return;
+    query=m.dataset.q; buildPicker(); paintQuery(); retrieve();
+  });
+  document.getElementById('go').addEventListener('click',retrieve);
+
+  paintQuery(); buildPicker();
+</script>
+</body>
+</html>
